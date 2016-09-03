@@ -14,6 +14,8 @@ _ = gettext.gettext
 import threading
 gtk.threads_init()
 import argparse
+import time
+import glib
 
 
 
@@ -84,10 +86,13 @@ class TailThread(threading.Thread):
 				inputs = [pipe_read]
 				outputs = []
 				set_blocking(pipe_read, True)
+				time.sleep(0.5)
 				readable, writable, exceptional = select.select(inputs, outputs, inputs, None)
 				if pipe_read in readable:
 					set_blocking(pipe_read, False)
 					gtk.threads_enter()
+					text_append = ''
+					n=0
 					while True:
 						try:
 							line = pipe_read.readline()
@@ -95,9 +100,10 @@ class TailThread(threading.Thread):
 						except IOError, exc:
 							if exc.errno == 11: break
 							else: self.kill()
-						limit_lines()
-						textbuffer.insert(textbuffer.get_end_iter(), line)
-					scroll_down_conditional()
+						text_append += line
+						n+=1
+					textbuffer.insert(textbuffer.get_end_iter(), text_append)
+					limit_lines()
 					gtk.threads_leave()
 			pipe_read.close()
 			if not self.exiting:
@@ -173,7 +179,7 @@ def lines_changed_restart(wdg):
 	timer = gobject.timeout_add(1000, start_tail_thread)
 	wdg.set_data('timer', timer)
 
-def do_connect(wdg):
+def cb_connect(wdg):
 	if wdg.get_active():
 		Global['Thread'].unpause()
 	else:
@@ -194,11 +200,20 @@ def scroll_down_conditional():
 		vadj = textview.get_vadjustment()
 		vadj.set_value(vadj.upper)
 
-def do_follow(wdg):
+def cb_follow(*ignore):
 	scroll_down_conditional()
 
+def toggle_follow(*ignore):
+	btn_auto.set_active(not btn_auto.get_active())
+
+def do_connect(*ignore):
+	btn_conn.set_active(True)
+
+def dont_connect(*ignore):
+	btn_conn.set_active(False)
+
 def line_inserted(*ignore):
-	scroll_down_conditional()
+	glib.idle_add(scroll_down_conditional, priority=glib.PRIORITY_HIGH_IDLE)
 
 def display_error(e):
 	text = None
@@ -214,7 +229,7 @@ def display_error(e):
 	dlg.run()
 	dlg.destroy()
 
-def open_new_file(wdg=None):
+def open_new_file(*ignore):
 	dialog = gtk.FileChooserDialog(_("Select a file"), None, gtk.FILE_CHOOSER_ACTION_OPEN, (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN, gtk.RESPONSE_OK))
 	dialog.set_action(gtk.FILE_CHOOSER_ACTION_OPEN)
 	if len(Args.FILE) == 1:
@@ -254,6 +269,17 @@ def bye(*ignore):
 	stop_tail_thread()
 	gtk.main_quit()
 
+def cb_lines_inc(*ignore):
+	adjus.set_value(adjus.get_value()+1)
+def cb_lines_dec(*ignore):
+	adjus.set_value(adjus.get_value()-1)
+def cb_font_enlarge(*ignore):
+	set_font_size_delta(None, +1)
+def cb_font_minify(*ignore):
+	set_font_size_delta(None, -1)
+def cb_font_default(*ignore):
+	set_font_size(None, 12)
+
 
 
 Global = {'Thread': None, 'Font': {'Size': 12,},}
@@ -277,6 +303,18 @@ win.set_default_size(720, 350)
 win.connect('delete-event', bye)
 start_evt = win.connect('map-event', main_win_show)
 add_key_binding(win, 'Escape', bye)
+add_key_binding(win, '<Control>C', bye)
+add_key_binding(win, '<Control>O', open_new_file)
+add_key_binding(win, 'F', toggle_follow)
+add_key_binding(win, '<Shift>F', toggle_follow)
+add_key_binding(win, 'plus', cb_font_enlarge)
+add_key_binding(win, 'minus', cb_font_minify)
+add_key_binding(win, 'equal', cb_font_default)
+add_key_binding(win, 'KP_Add', cb_font_enlarge)
+add_key_binding(win, 'KP_Subtract', cb_font_minify)
+add_key_binding(win, 'KP_Equal', cb_font_default)
+add_key_binding(win, '<Control>S', dont_connect)
+add_key_binding(win, '<Control>Q', do_connect)
 
 frame = gtk.VBox()
 toolbar = toolbar = gtk.Toolbar()
@@ -305,12 +343,12 @@ btn_open.connect('clicked', open_new_file)
 toolbar.insert(btn_open, -1)
 btn_conn = gtk.ToggleToolButton()
 set_tooltip_btn_conn()
-btn_conn.connect('toggled', do_connect)
+btn_conn.connect('toggled', cb_connect)
 toolbar.insert(btn_conn, -1)
 btn_auto = gtk.ToggleToolButton(gtk.STOCK_GOTO_BOTTOM)
 btn_auto.set_active(True)
 btn_auto.set_tooltip_text(_("Auto Scroll"))
-btn_auto.connect('toggled', do_follow)
+btn_auto.connect('toggled', cb_follow)
 toolbar.insert(btn_auto, -1)
 toolbar.insert(gtk.SeparatorToolItem(), -1)
 btn_size_plus = gtk.ToolButton(gtk.STOCK_ZOOM_IN)
