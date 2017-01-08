@@ -84,10 +84,9 @@ class TailThread(threading.Thread):
 			info = {}
 			while waitpid_but_running(pid, info):
 				inputs = [pipe_read]
-				outputs = []
 				set_blocking(pipe_read, True)
 				time.sleep(0.5)
-				readable, writable, exceptional = select.select(inputs, outputs, inputs, None)
+				readable, x, x = select.select(inputs, [], [], None)
 				if pipe_read in readable:
 					set_blocking(pipe_read, False)
 					gtk.threads_enter()
@@ -102,7 +101,7 @@ class TailThread(threading.Thread):
 							else: self.kill()
 						text_append += line
 						n+=1
-					textbuffer.insert(textbuffer.get_end_iter(), text_append)
+					append_lines(text_append)
 					limit_lines()
 					gtk.threads_leave()
 			pipe_read.close()
@@ -163,11 +162,16 @@ def start_tail_thread(wdg=None):
 	Global['Thread'] = TailThread(Args.FILE, tail_opts)
 	Global['Thread'].start()
 
+def append_lines(text):
+	textbuffer.insert(textbuffer.get_end_iter(), text)
+
 def limit_lines(corrig=0):
 	clns = textbuffer.get_line_count() + corrig
 	rlns = int(spin.get_text())
 	if clns > rlns:
+		vadjustment.handler_block(vadjustment.get_data('handler-value-changed'))
 		textbuffer.delete(textbuffer.get_start_iter(), textbuffer.get_iter_at_line(clns - rlns))
+		glib.idle_add(lambda: vadjustment.handler_unblock(vadjustment.get_data('handler-value-changed')), priority=glib.PRIORITY_DEFAULT_IDLE)
 
 def lines_changed(wdg):
 	limit_lines(-1)
@@ -194,26 +198,30 @@ def set_tooltip_btn_conn():
 		btn_conn.set_stock_id(gtk.STOCK_DISCONNECT)
 		btn_conn.set_tooltip_text(_("Updating"))
 
-def scroll_down_conditional():
-	if btn_auto.get_active():
-		#textview.scroll_to_iter(textbuffer.get_end_iter(), 0)
-		vadj = textview.get_vadjustment()
-		vadj.set_value(vadj.upper)
+def scrollbar_adjusted(vadj):
+	pos = vadj.get_value()
+	bottom = vadj.get_upper() - vadj.get_page_size()
+	btn_auto.set_active(pos >= bottom)
 
-def cb_follow(*ignore):
+def scroll_down():
+	vadjustment.set_value(vadjustment.get_upper() - vadjustment.get_page_size())
+
+def scroll_down_conditional(*x):
+	if btn_auto.get_active():
+		scroll_down()
+
+def cb_click_follow(*ignore):
 	scroll_down_conditional()
 
 def toggle_follow(*ignore):
 	btn_auto.set_active(not btn_auto.get_active())
+	scroll_down_conditional()
 
 def do_connect(*ignore):
 	btn_conn.set_active(True)
 
 def dont_connect(*ignore):
 	btn_conn.set_active(False)
-
-def line_inserted(*ignore):
-	glib.idle_add(scroll_down_conditional, priority=glib.PRIORITY_HIGH_IDLE)
 
 def display_error(e):
 	text = None
@@ -321,10 +329,14 @@ toolbar = toolbar = gtk.Toolbar()
 toolbar.set_style(gtk.TOOLBAR_ICONS)
 scroll = gtk.ScrolledWindow()
 scroll.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+vadjustment = scroll.get_vadjustment()
+vadj_handler = vadjustment.connect('value-changed', scrollbar_adjusted)
+vadjustment.set_data('handler-value-changed', vadj_handler)
+
 textbuffer = gtk.TextBuffer()
-textbuffer.connect('changed', line_inserted)
 textview = gtk.TextView(textbuffer)
 textview.set_editable(False)
+textview.connect('size-allocate', scroll_down_conditional)
 set_font_size_delta(None, 0)
 
 win.add(frame)
@@ -348,7 +360,7 @@ toolbar.insert(btn_conn, -1)
 btn_auto = gtk.ToggleToolButton(gtk.STOCK_GOTO_BOTTOM)
 btn_auto.set_active(True)
 btn_auto.set_tooltip_text(_("Auto Scroll"))
-btn_auto.connect('toggled', cb_follow)
+btn_auto.connect('clicked', cb_click_follow)
 toolbar.insert(btn_auto, -1)
 toolbar.insert(gtk.SeparatorToolItem(), -1)
 btn_size_plus = gtk.ToolButton(gtk.STOCK_ZOOM_IN)
