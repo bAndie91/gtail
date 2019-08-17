@@ -196,7 +196,7 @@ def set_tooltip_btn_conn():
 		btn_conn.set_tooltip_text(_("Pause"))
 	else:
 		btn_conn.set_stock_id(gtk.STOCK_DISCONNECT)
-		btn_conn.set_tooltip_text(_("Updating"))
+		btn_conn.set_tooltip_text(_("Unpause and watch"))
 
 def scrollbar_adjusted(vadj):
 	pos = vadj.get_value()
